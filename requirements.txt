@@ -2,5 +2,6 @@ pandas
 numpy
 requests
 ta
+websockets
 python-binance
 python-telegram-bot==20.6
