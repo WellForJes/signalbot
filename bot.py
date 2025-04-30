@@ -61,6 +61,17 @@ def prepare_data(df):
     df['CCI'] = ta.trend.cci(df['high'], df['low'], df['close'], window=20)
     return df.dropna()
 
+def calculate_tp_sl(entry_price, direction, take_percent=13, stop_percent=5):
+    if direction == "LONG":
+        tp = round(entry_price * (1 + take_percent / 100), 5)
+        sl = round(entry_price * (1 - stop_percent / 100), 5)
+    elif direction == "SHORT":
+        tp = round(entry_price * (1 - take_percent / 100), 5)
+        sl = round(entry_price * (1 + stop_percent / 100), 5)
+    else:
+        raise ValueError("Direction must be 'LONG' or 'SHORT'")
+    return tp, sl
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -110,14 +121,12 @@ async def trading_bot(symbols, interval='30m'):
                         continue
                     if (last_row['ADX'] > 20 and last_row['volatility'] > 0.0015 and last_row['volume'] > last_row['volume_mean'] and abs(last_row['CCI']) > 100):
                         if (last_row['EMA50'] > last_row['EMA200'] and last_row['close'] > last_row['EMA200']):
-                            tp = round(entry_price * 1.007, 5)
-                            sl = round(entry_price * 0.997, 5)
+                            tp, sl = calculate_tp_sl(entry_price, "LONG")
                             await send_signal(symbol, interval, "LONG", entry_price, tp, sl)
                             sent_signals.add(signal_id)
                             session_log += f"{symbol}: ✅ Сигнал LONG\n"
                         elif (last_row['EMA50'] < last_row['EMA200'] and last_row['close'] < last_row['EMA200']):
-                            tp = round(entry_price * 0.993, 5)
-                            sl = round(entry_price * 1.003, 5)
+                            tp, sl = calculate_tp_sl(entry_price, "SHORT")
                             await send_signal(symbol, interval, "SHORT", entry_price, tp, sl)
                             sent_signals.add(signal_id)
                             session_log += f"{symbol}: ✅ Сигнал SHORT\n"
