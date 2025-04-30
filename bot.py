@@ -136,5 +136,5 @@ if __name__ == '__main__':
         await app.initialize()
         await app.start()
         await start_streaming()
-        await app.stop()
+        # await app.stop()  # Удалено, чтобы бот работал бесконечно
     asyncio.run(run())
