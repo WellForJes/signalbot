@@ -102,7 +102,10 @@ async def stream_price(symbol):
             return await stream_price(symbol)
 
         df_30m = prepare_data(df_30m)
-        last_30m_time = df_30m.index[-1]
+        if df_30m.empty:
+    print(f"⚠️ df_30m пустой у {symbol}, пропуск")
+    return
+last_30m_time = df_30m.index[-1]
 
         while True:
             try:
