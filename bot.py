@@ -93,36 +93,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stream_price(symbol):
     uri = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
     async with websockets.connect(uri) as websocket:
-        df = get_binance_klines(symbol, '1m', limit=200)
-        df = prepare_data(df)
+        df_30m = get_binance_klines(symbol, '30m', limit=100)
+        df_1h = get_binance_klines(symbol, '1h', limit=100)
+        df_30m = prepare_data(df_30m)
+        # df_1h['EMA200'] = ta.trend.ema_indicator(df_1h['close'], window=200)
+        last_30m_time = df_30m.index[-1]
+
         while True:
             try:
                 data = json.loads(await websocket.recv())
                 kline = data['k']
                 if kline['x']:  # свеча закрыта
-                    new_row = {
-                        'open': float(kline['o']),
-                        'high': float(kline['h']),
-                        'low': float(kline['l']),
-                        'close': float(kline['c']),
-                        'volume': float(kline['v'])
-                    }
-                    df.loc[pd.to_datetime(int(kline['t']), unit='ms')] = new_row
-                    df = prepare_data(df)
-                    last_row = df.iloc[-1]
-                    entry_price = last_row['close']
-                    signal_id = f"{symbol}-1m-{round(entry_price, 4)}"
-                    if signal_id in sent_signals or symbol in active_positions:
-                        continue
-                    if (last_row['ADX'] > 20 and last_row['volatility'] > 0.0015 and last_row['volume'] > last_row['volume_mean'] and abs(last_row['CCI']) > 100):
-                        if (last_row['EMA50'] > last_row['EMA200'] and last_row['close'] > last_row['EMA200']):
-                            tp, sl = calculate_tp_sl(entry_price, "LONG")
-                            await send_signal(symbol, '1m', "LONG", entry_price, tp, sl)
-                            sent_signals.add(signal_id)
-                        elif (last_row['EMA50'] < last_row['EMA200'] and last_row['close'] < last_row['EMA200']):
-                            tp, sl = calculate_tp_sl(entry_price, "SHORT")
-                            await send_signal(symbol, '1m', "SHORT", entry_price, tp, sl)
-                            sent_signals.add(signal_id)
+                    # Проверяем: закрылась ли новая 30-минутка
+                    new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
+                    if new_candle_time > last_30m_time:
+                        df_30m = get_binance_klines(symbol, '30m', limit=100)
+                        df_1h = get_binance_klines(symbol, '1h', limit=100)
+                        df_30m = prepare_data(df_30m)
+                        df_1h['EMA200'] = ta.trend.ema_indicator(df_1h['close'], window=200)
+                        last_row = df_30m.iloc[-1]
+                        trend_row = df_1h.iloc[-1]
+                        entry_price = last_row['close']
+                        signal_id = f"{symbol}-30m-{round(entry_price, 4)}"
+
+                        if signal_id in sent_signals or symbol in active_positions:
+                            last_30m_time = new_candle_time
+                            continue
+
+                        if (
+                            last_row['ADX'] > 20 and
+                            last_row['volatility'] > 0.0015 and
+                            last_row['volume'] > last_row['volume_mean'] and
+                            abs(last_row['CCI']) > 100
+                        ):
+                            if (
+                                last_row['EMA50'] > last_row['EMA200'] and
+                                last_row['close'] > last_row['EMA200'] and
+                                True  # убрано EMA200 с 1H
+                            ):
+                                tp, sl = calculate_tp_sl(entry_price, "LONG")
+                                await send_signal(symbol, '30m', "LONG", entry_price, tp, sl)
+                                sent_signals.add(signal_id)
+                            elif (
+                                last_row['EMA50'] < last_row['EMA200'] and
+                                last_row['close'] < last_row['EMA200'] and
+                                True  # убрано EMA200 с 1H
+                            ):
+                                tp, sl = calculate_tp_sl(entry_price, "SHORT")
+                                await send_signal(symbol, '30m', "SHORT", entry_price, tp, sl)
+                                sent_signals.add(signal_id)
+
+                        last_30m_time = new_candle_time
             except Exception as e:
                 print(f"Ошибка для {symbol}: {e}")
                 await asyncio.sleep(1)
@@ -147,16 +168,18 @@ async def start_streaming():
         connected = []
         while not status_queue.empty():
             connected.append(await status_queue.get())
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
+       now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
     async def hourly_check():
         while True:
             await asyncio.sleep(3600)
             now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            active = "\n".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}\n{active}")
+            active = "
+".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}
+{active}")
 
     tasks = [monitored_stream(symbol) for symbol in symbols]
     tasks.append(startup_log())
