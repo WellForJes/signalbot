@@ -61,7 +61,7 @@ def prepare_data(df):
     df['CCI'] = ta.trend.cci(df['high'], df['low'], df['close'], window=20)
     return df.dropna()
 
-def calculate_tp_sl(entry_price, direction, take_percent=13, stop_percent=5):
+def calculate_tp_sl(entry_price, direction, take_percent=1.5, stop_percent=5):
     if direction == "LONG":
         tp = round(entry_price * (1 + take_percent / 100), 5)
         sl = round(entry_price * (1 - stop_percent / 100), 5)
