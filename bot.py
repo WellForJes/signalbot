@@ -95,6 +95,12 @@ async def stream_price(symbol):
     async with websockets.connect(uri) as websocket:
         df_30m = get_binance_klines(symbol, '30m', limit=100)
         df_1h = get_binance_klines(symbol, '1h', limit=100)
+
+        if df_30m.empty or df_1h.empty:
+            print(f"⚠️ Нет данных по {symbol}. Жду 30 секунд и пробую снова.")
+            await asyncio.sleep(30)
+            return await stream_price(symbol)
+
         df_30m = prepare_data(df_30m)
         last_30m_time = df_30m.index[-1]
 
@@ -106,11 +112,22 @@ async def stream_price(symbol):
                     new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
                     if new_candle_time > last_30m_time:
                         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕓 {symbol.upper()}: 30m свеча закрыта в {now}. Анализирую рынок...")
+                        await app.bot.send_message(
+                            chat_id=TELEGRAM_CHAT_ID,
+                            text=f"🕓 {symbol.upper()}: 30m свеча закрыта в {now}. Начинаю анализ..."
+                        )
+
                         df_30m = get_binance_klines(symbol, '30m', limit=100)
                         df_1h = get_binance_klines(symbol, '1h', limit=100)
+
+                        if df_30m.empty or df_1h.empty:
+                            print(f"⚠️ Binance не отдал свечи по {symbol} после закрытия. Жду...")
+                            await asyncio.sleep(10)
+                            continue
+
                         df_30m = prepare_data(df_30m)
                         df_1h['EMA200'] = ta.trend.ema_indicator(df_1h['close'], window=200)
+
                         last_row = df_30m.iloc[-1]
                         trend_row = df_1h.iloc[-1]
                         entry_price = last_row['close']
@@ -144,14 +161,7 @@ async def stream_price(symbol):
                         last_30m_time = new_candle_time
             except Exception as e:
                 print(f"Ошибка для {symbol}: {e}")
-                await asyncio.sleep(1)
-
-async def hourly_status():
-    while True:
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        msg = f"✅ Бот работает. Текущее время: {now}"
-        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
-        await asyncio.sleep(3600)
+                await asyncio.sleep(5)
 
 async def start_streaming():
     symbols = ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'ltcusdt', 'adausdt']
@@ -170,16 +180,8 @@ async def start_streaming():
         message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
-    async def hourly_check():
-        while True:
-            await asyncio.sleep(3600)
-            now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            active = "\n".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}\n{active}")
-
     tasks = [monitored_stream(symbol) for symbol in symbols]
     tasks.append(startup_log())
-    tasks.append(hourly_check())
     await asyncio.gather(*tasks)
 
 app.add_handler(CallbackQueryHandler(button_handler))
