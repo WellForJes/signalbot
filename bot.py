@@ -133,13 +133,13 @@ app.add_handler(CallbackQueryHandler(button_handler))
 
 if __name__ == '__main__':
     async def run():
-    try:
-        await app.initialize()
-        await app.start()
-        await start_streaming()
-    except Exception as e:
-        msg = f"❌ Бот аварийно остановлен: {e}"
-        print(msg)
-        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+        try:
+            await app.initialize()
+            await app.start()
+            await start_streaming()
+        except Exception as e:
+            msg = f"❌ Бот аварийно остановлен: {e}"
+            print(msg)
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
 
-asyncio.run(run())
+    asyncio.run(run())
