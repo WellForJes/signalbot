@@ -136,11 +136,36 @@ async def hourly_status():
 
 async def start_streaming():
     symbols = ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'ltcusdt', 'adausdt']
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    log_message = f"🤖 Бот запущен: {now}\nНачат анализ монет:\n" + "\n".join([f"🟢 {s.upper()} через WebSocket" for s in symbols])
-    await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=log_message)
-    tasks = [stream_price(symbol) for symbol in symbols]
-    tasks.append(hourly_status())
+    status_queue = asyncio.Queue()
+
+    async def monitored_stream(symbol):
+        await status_queue.put(f"🟢 {symbol.upper()} подключён через WebSocket")
+        await stream_price(symbol)
+
+    async def startup_log():
+        await asyncio.sleep(2)
+        connected = []
+        while not status_queue.empty():
+            connected.append(await status_queue.get())
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        message = f"🤖 Бот запущен: {now}
+Успешно подключены WebSocket потоки:
+" + "
+".join(connected)
+        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+
+    async def hourly_check():
+        while True:
+            await asyncio.sleep(3600)
+            now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            active = "
+".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}
+{active}")
+
+    tasks = [monitored_stream(symbol) for symbol in symbols]
+    tasks.append(startup_log())
+    tasks.append(hourly_check())
     await asyncio.gather(*tasks)
 
 app.add_handler(CallbackQueryHandler(button_handler))
