@@ -8,7 +8,7 @@ import os
 import datetime
 import websockets
 from binance.client import Client
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 API_KEY = os.getenv('BINANCE_API_KEY')
@@ -53,16 +53,20 @@ def calculate_tp_sl(entry_price, direction, take_percent=1.5, stop_percent=0.5):
 
 def get_binance_klines(symbol, interval, limit=500):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol.upper()}&interval={interval}&limit={limit}"
-    data = requests.get(url).json()
-    df = pd.DataFrame(data, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'number_of_trades',
-        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-    ])
-    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    df.set_index('timestamp', inplace=True)
-    df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
-    return df
+    try:
+        data = requests.get(url, timeout=10).json()
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'number_of_trades',
+            'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+        ])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
+        return df
+    except Exception as e:
+        print(f"Ошибка получения свечей для {symbol}: {e}")
+        return pd.DataFrame()
 
 def prepare_data(df):
     df['EMA50'] = ta.trend.ema_indicator(df['close'], window=50)
@@ -92,17 +96,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stream_price(symbol):
     uri = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
     async with websockets.connect(uri) as websocket:
-        df_30m = get_binance_klines(symbol, '30m', limit=100)
-        df_1h = get_binance_klines(symbol, '1h', limit=100)
+        # Повторяем попытки получить начальные свечи
+        retries = 0
+        while retries < 5:
+            df_30m = get_binance_klines(symbol, '30m', limit=100)
+            df_1h = get_binance_klines(symbol, '1h', limit=100)
+            if not df_30m.empty and not df_1h.empty:
+                break
+            retries += 1
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ {symbol.upper()}: свечи пустые, пробую снова ({retries}/5)")
+            await asyncio.sleep(10)
 
         if df_30m.empty or df_1h.empty:
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не отдал свечи. Ждём 30 сек...")
-            await asyncio.sleep(30)
-            return await stream_price(symbol)
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не вернул данные даже после 5 попыток")
+            return
 
         df_30m = prepare_data(df_30m)
         if df_30m.empty:
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ df_30m пустой у {symbol.upper()}, пропуск")
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ df_30m пустой у {symbol.upper()}, анализ невозможен.")
             return
 
         last_30m_time = df_30m.index[-1]
@@ -118,7 +129,7 @@ async def stream_price(symbol):
                         df_1h = get_binance_klines(symbol, '1h', limit=100)
 
                         if df_30m.empty or df_1h.empty:
-                            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не вернул данные после свечи")
+                            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ {symbol.upper()}: не удалось получить данные после свечи.")
                             await asyncio.sleep(10)
                             continue
 
@@ -126,23 +137,22 @@ async def stream_price(symbol):
                         df_1h['EMA200'] = ta.trend.ema_indicator(df_1h['close'], window=200)
 
                         last_row = df_30m.iloc[-1]
-                        trend_row = df_1h.iloc[-1]
                         entry_price = last_row['close']
                         signal_id = f"{symbol}-30m-{round(entry_price, 4)}"
 
                         debug_message = (
                             f"🔍 Анализ {symbol.upper()}:\n"
-                            f"📅 Время свечи: {new_candle_time}\n"
-                            f"💰 Цена закрытия: {entry_price}\n"
-                            f"📈 EMA50: {last_row['EMA50']:.2f}, EMA200: {last_row['EMA200']:.2f}\n"
-                            f"📊 ADX: {last_row['ADX']:.2f}, Объём: {last_row['volume']:.2f}, Средний: {last_row['volume_mean']:.2f}\n"
-                            f"📉 CCI: {last_row['CCI']:.2f}, Волатильность: {last_row['volatility']:.5f}\n"
+                            f"⏰ Время свечи: {new_candle_time}\n"
+                            f"💰 Закрытие: {entry_price:.4f}\n"
+                            f"EMA50: {last_row['EMA50']:.2f}, EMA200: {last_row['EMA200']:.2f}\n"
+                            f"ADX: {last_row['ADX']:.2f}, Vol: {last_row['volume']:.2f}, Средний: {last_row['volume_mean']:.2f}\n"
+                            f"CCI: {last_row['CCI']:.2f}, Волатильность: {last_row['volatility']:.5f}\n"
                         )
 
                         if signal_id in sent_signals:
-                            debug_message += "⏳ Пропущено: уже был сигнал.\n"
+                            debug_message += "⏳ Уже был сигнал.\n"
                         elif symbol in active_positions:
-                            debug_message += "🚫 Пропущено: у вас уже активна позиция.\n"
+                            debug_message += "🚫 Уже в позиции.\n"
                         elif (
                             last_row['ADX'] > 20 and
                             last_row['volatility'] > 0.0015 and
@@ -156,7 +166,7 @@ async def stream_price(symbol):
                                 tp, sl = calculate_tp_sl(entry_price, "LONG")
                                 await send_signal(symbol, '30m', "LONG", entry_price, tp, sl)
                                 sent_signals.add(signal_id)
-                                debug_message += "✅ Сигнал LONG отправлен.\n"
+                                debug_message += "✅ LONG сигнал отправлен.\n"
                             elif (
                                 last_row['EMA50'] < last_row['EMA200'] and
                                 last_row['close'] < last_row['EMA200']
@@ -164,16 +174,16 @@ async def stream_price(symbol):
                                 tp, sl = calculate_tp_sl(entry_price, "SHORT")
                                 await send_signal(symbol, '30m', "SHORT", entry_price, tp, sl)
                                 sent_signals.add(signal_id)
-                                debug_message += "✅ Сигнал SHORT отправлен.\n"
+                                debug_message += "✅ SHORT сигнал отправлен.\n"
                             else:
-                                debug_message += "⚠️ Нет чёткого направления по EMA.\n"
+                                debug_message += "⚠️ Нет направления по EMA.\n"
                         else:
-                            debug_message += "⚠️ Условия для входа не выполнены.\n"
+                            debug_message += "⚠️ Условия не выполнены.\n"
 
                         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=debug_message)
                         last_30m_time = new_candle_time
             except Exception as e:
-                await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❗ Ошибка в {symbol.upper()}: {e}")
+                await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❗ Ошибка у {symbol.upper()}: {e}")
                 await asyncio.sleep(5)
 
 async def start_streaming():
@@ -181,16 +191,16 @@ async def start_streaming():
     status_queue = asyncio.Queue()
 
     async def monitored_stream(symbol):
-        await status_queue.put(f"🟢 {symbol.upper()} подключён через WebSocket")
+        await status_queue.put(f"🟢 {symbol.upper()} подключён")
         await stream_price(symbol)
 
     async def startup_log():
         await asyncio.sleep(2)
-        connected = []
+        lines = []
         while not status_queue.empty():
-            connected.append(await status_queue.get())
+            lines.append(await status_queue.get())
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
+        message = f"🤖 Бот запущен: {now}\n" + "\n".join(lines)
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
     tasks = [monitored_stream(symbol) for symbol in symbols]
