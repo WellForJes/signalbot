@@ -5,7 +5,6 @@ import json
 import ta
 import asyncio
 import os
-import time
 import datetime
 import websockets
 from binance.client import Client
@@ -97,14 +96,15 @@ async def stream_price(symbol):
         df_1h = get_binance_klines(symbol, '1h', limit=100)
 
         if df_30m.empty or df_1h.empty:
-            print(f"⚠️ Нет данных по {symbol}. Жду 30 секунд и пробую снова.")
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не отдал свечи. Ждём 30 сек...")
             await asyncio.sleep(30)
             return await stream_price(symbol)
 
         df_30m = prepare_data(df_30m)
         if df_30m.empty:
-            print(f"⚠️ df_30m пустой у {symbol}, пропуск")
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ df_30m пустой у {symbol.upper()}, пропуск")
             return
+
         last_30m_time = df_30m.index[-1]
 
         while True:
@@ -114,17 +114,11 @@ async def stream_price(symbol):
                 if kline['x']:
                     new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
                     if new_candle_time > last_30m_time:
-                        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        await app.bot.send_message(
-                            chat_id=TELEGRAM_CHAT_ID,
-                            text=f"🕓 {symbol.upper()}: 30m свеча закрыта в {now}. Начинаю анализ..."
-                        )
-
                         df_30m = get_binance_klines(symbol, '30m', limit=100)
                         df_1h = get_binance_klines(symbol, '1h', limit=100)
 
                         if df_30m.empty or df_1h.empty:
-                            print(f"⚠️ Binance не отдал свечи по {symbol} после закрытия. Жду...")
+                            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не вернул данные после свечи")
                             await asyncio.sleep(10)
                             continue
 
@@ -136,11 +130,20 @@ async def stream_price(symbol):
                         entry_price = last_row['close']
                         signal_id = f"{symbol}-30m-{round(entry_price, 4)}"
 
-                        if signal_id in sent_signals or symbol in active_positions:
-                            last_30m_time = new_candle_time
-                            continue
+                        debug_message = (
+                            f"🔍 Анализ {symbol.upper()}:\n"
+                            f"📅 Время свечи: {new_candle_time}\n"
+                            f"💰 Цена закрытия: {entry_price}\n"
+                            f"📈 EMA50: {last_row['EMA50']:.2f}, EMA200: {last_row['EMA200']:.2f}\n"
+                            f"📊 ADX: {last_row['ADX']:.2f}, Объём: {last_row['volume']:.2f}, Средний: {last_row['volume_mean']:.2f}\n"
+                            f"📉 CCI: {last_row['CCI']:.2f}, Волатильность: {last_row['volatility']:.5f}\n"
+                        )
 
-                        if (
+                        if signal_id in sent_signals:
+                            debug_message += "⏳ Пропущено: уже был сигнал.\n"
+                        elif symbol in active_positions:
+                            debug_message += "🚫 Пропущено: у вас уже активна позиция.\n"
+                        elif (
                             last_row['ADX'] > 20 and
                             last_row['volatility'] > 0.0015 and
                             last_row['volume'] > last_row['volume_mean'] and
@@ -153,6 +156,7 @@ async def stream_price(symbol):
                                 tp, sl = calculate_tp_sl(entry_price, "LONG")
                                 await send_signal(symbol, '30m', "LONG", entry_price, tp, sl)
                                 sent_signals.add(signal_id)
+                                debug_message += "✅ Сигнал LONG отправлен.\n"
                             elif (
                                 last_row['EMA50'] < last_row['EMA200'] and
                                 last_row['close'] < last_row['EMA200']
@@ -160,10 +164,16 @@ async def stream_price(symbol):
                                 tp, sl = calculate_tp_sl(entry_price, "SHORT")
                                 await send_signal(symbol, '30m', "SHORT", entry_price, tp, sl)
                                 sent_signals.add(signal_id)
+                                debug_message += "✅ Сигнал SHORT отправлен.\n"
+                            else:
+                                debug_message += "⚠️ Нет чёткого направления по EMA.\n"
+                        else:
+                            debug_message += "⚠️ Условия для входа не выполнены.\n"
 
+                        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=debug_message)
                         last_30m_time = new_candle_time
             except Exception as e:
-                print(f"Ошибка для {symbol}: {e}")
+                await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❗ Ошибка в {symbol.upper()}: {e}")
                 await asyncio.sleep(5)
 
 async def start_streaming():
