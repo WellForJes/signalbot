@@ -148,20 +148,15 @@ async def start_streaming():
         while not status_queue.empty():
             connected.append(await status_queue.get())
         now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        message = f"🤖 Бот запущен: {now}
-Успешно подключены WebSocket потоки:
-" + "
-".join(connected)
+        message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
     async def hourly_check():
         while True:
             await asyncio.sleep(3600)
             now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            active = "
-".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}
-{active}")
+            active = "\n".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}\n{active}")
 
     tasks = [monitored_stream(symbol) for symbol in symbols]
     tasks.append(startup_log())
