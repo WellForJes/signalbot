@@ -5,6 +5,7 @@ import ta
 import asyncio
 import os
 import time
+import datetime
 import websockets
 from binance.client import Client
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -80,7 +81,6 @@ async def stream_price(symbol):
     async with websockets.connect(uri) as websocket:
         df = get_binance_klines(symbol, '1m', limit=200)
         df = prepare_data(df)
-        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🟢 {symbol.upper()} анализируется через WebSocket")
         while True:
             try:
                 data = json.loads(await websocket.recv())
@@ -113,9 +113,20 @@ async def stream_price(symbol):
                 print(f"Ошибка для {symbol}: {e}")
                 await asyncio.sleep(1)
 
+async def hourly_status():
+    while True:
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        msg = f"✅ Бот работает. Текущее время: {now}"
+        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+        await asyncio.sleep(3600)
+
 async def start_streaming():
-    await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text="🤖 Бот с WebSocket потоками запущен и начал анализ монет!")
-    tasks = [stream_price(symbol) for symbol in ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'ltcusdt', 'adausdt']]
+    symbols = ['btcusdt', 'ethusdt', 'solusdt', 'xrpusdt', 'ltcusdt', 'adausdt']
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_message = f"🤖 Бот запущен: {now}\nНачат анализ монет:\n" + "\n".join([f"🟢 {s.upper()} через WebSocket" for s in symbols])
+    await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=log_message)
+    tasks = [stream_price(symbol) for symbol in symbols]
+    tasks.append(hourly_status())
     await asyncio.gather(*tasks)
 
 app.add_handler(CallbackQueryHandler(button_handler))
