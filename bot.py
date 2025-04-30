@@ -96,17 +96,17 @@ async def stream_price(symbol):
         df_30m = get_binance_klines(symbol, '30m', limit=100)
         df_1h = get_binance_klines(symbol, '1h', limit=100)
         df_30m = prepare_data(df_30m)
-        # df_1h['EMA200'] = ta.trend.ema_indicator(df_1h['close'], window=200)
         last_30m_time = df_30m.index[-1]
 
         while True:
             try:
                 data = json.loads(await websocket.recv())
                 kline = data['k']
-                if kline['x']:  # свеча закрыта
-                    # Проверяем: закрылась ли новая 30-минутка
+                if kline['x']:
                     new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
                     if new_candle_time > last_30m_time:
+                        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕓 {symbol.upper()}: 30m свеча закрыта в {now}. Анализирую рынок...")
                         df_30m = get_binance_klines(symbol, '30m', limit=100)
                         df_1h = get_binance_klines(symbol, '1h', limit=100)
                         df_30m = prepare_data(df_30m)
@@ -128,16 +128,14 @@ async def stream_price(symbol):
                         ):
                             if (
                                 last_row['EMA50'] > last_row['EMA200'] and
-                                last_row['close'] > last_row['EMA200'] and
-                                True  # убрано EMA200 с 1H
+                                last_row['close'] > last_row['EMA200']
                             ):
                                 tp, sl = calculate_tp_sl(entry_price, "LONG")
                                 await send_signal(symbol, '30m', "LONG", entry_price, tp, sl)
                                 sent_signals.add(signal_id)
                             elif (
                                 last_row['EMA50'] < last_row['EMA200'] and
-                                last_row['close'] < last_row['EMA200'] and
-                                True  # убрано EMA200 с 1H
+                                last_row['close'] < last_row['EMA200']
                             ):
                                 tp, sl = calculate_tp_sl(entry_price, "SHORT")
                                 await send_signal(symbol, '30m', "SHORT", entry_price, tp, sl)
@@ -168,18 +166,16 @@ async def start_streaming():
         connected = []
         while not status_queue.empty():
             connected.append(await status_queue.get())
-       now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        message = f"🤖 Бот запущен: {now}\nУспешно подключены WebSocket потоки:\n" + "\n".join(connected)
         await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
     async def hourly_check():
         while True:
             await asyncio.sleep(3600)
             now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            active = "
-".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}
-{active}")
+            active = "\n".join([f"✅ {s.upper()} WebSocket активен" for s in symbols])
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🕒 Проверка состояния: {now}\n{active}")
 
     tasks = [monitored_stream(symbol) for symbol in symbols]
     tasks.append(startup_log())
