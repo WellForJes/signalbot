@@ -107,8 +107,8 @@ async def stream_price(symbol):
     async with websockets.connect(uri) as websocket:
         max_retries = 10
         for retries in range(1, max_retries + 1):
-            df_30m = get_binance_klines(symbol, '30m', limit=100)
-            df_1h = get_binance_klines(symbol, '1h', limit=100)
+            df_30m = get_binance_klines(symbol, '30m', limit=500)
+            df_1h = get_binance_klines(symbol, '1h', limit=500)
             if not df_30m.empty and not df_1h.empty:
                 break
             print(f"[{symbol}] Попытка {retries}/{max_retries}: свечи не получены.")
@@ -132,8 +132,8 @@ async def stream_price(symbol):
                 if kline['x']:
                     new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
                     if new_candle_time > last_30m_time:
-                        df_30m = get_binance_klines(symbol, '30m', limit=100)
-                        df_1h = get_binance_klines(symbol, '1h', limit=100)
+                        df_30m = get_binance_klines(symbol, '30m', limit=500)
+                        df_1h = get_binance_klines(symbol, '1h', limit=500)
 
                         if df_30m.empty or df_1h.empty:
                             await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ {symbol.upper()}: не удалось получить данные после свечи.")
