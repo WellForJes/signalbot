@@ -96,19 +96,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def stream_price(symbol):
     uri = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
     async with websockets.connect(uri) as websocket:
-        # Повторяем попытки получить начальные свечи
-        retries = 0
-        while retries < 5:
+        max_retries = 10
+        for retries in range(1, max_retries + 1):
             df_30m = get_binance_klines(symbol, '30m', limit=100)
             df_1h = get_binance_klines(symbol, '1h', limit=100)
             if not df_30m.empty and not df_1h.empty:
                 break
-            retries += 1
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"⚠️ {symbol.upper()}: свечи пустые, пробую снова ({retries}/5)")
-            await asyncio.sleep(10)
+            print(f"[{symbol}] Попытка {retries}/{max_retries}: свечи не получены.")
+            await asyncio.sleep(15)
 
         if df_30m.empty or df_1h.empty:
-            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: Binance не вернул данные даже после 5 попыток")
+            await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"❌ {symbol.upper()}: не удалось получить свечи после {max_retries} попыток.")
             return
 
         df_30m = prepare_data(df_30m)
@@ -215,6 +213,8 @@ if __name__ == '__main__':
             await app.initialize()
             await app.start()
             await start_streaming()
+        except asyncio.CancelledError:
+            print("⛔ Завершение по CancelledError (обычно при остановке Render)")
         except Exception as e:
             msg = f"❌ Бот аварийно остановлен: {e}"
             print(msg)
