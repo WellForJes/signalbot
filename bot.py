@@ -54,7 +54,16 @@ def calculate_tp_sl(entry_price, direction, take_percent=1.5, stop_percent=0.5):
 def get_binance_klines(symbol, interval, limit=500):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol.upper()}&interval={interval}&limit={limit}"
     try:
-        data = requests.get(url, timeout=10).json()
+        response = requests.get(url, timeout=10)
+        if response.status_code != 200:
+            print(f"[{symbol}] Ошибка {response.status_code}: {response.text[:100]}")
+            return pd.DataFrame()
+
+        data = response.json()
+        if not isinstance(data, list) or len(data) == 0:
+            print(f"[{symbol}] Пустой или странный ответ: {data}")
+            return pd.DataFrame()
+
         df = pd.DataFrame(data, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'number_of_trades',
@@ -65,7 +74,7 @@ def get_binance_klines(symbol, interval, limit=500):
         df = df[['open', 'high', 'low', 'close', 'volume']].astype(float)
         return df
     except Exception as e:
-        print(f"Ошибка получения свечей для {symbol}: {e}")
+        print(f"[{symbol}] Исключение: {e}")
         return pd.DataFrame()
 
 def prepare_data(df):
