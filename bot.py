@@ -131,7 +131,7 @@ async def stream_price(symbol):
                 kline = data['k']
                 if kline['x']:
                     new_candle_time = pd.to_datetime(int(kline['t']), unit='ms')
-                    if new_candle_time > last_30m_time:
+                    if new_candle_time.floor('30T') > last_30m_time:
                         df_30m = get_binance_klines(symbol, '30m', limit=500)
                         df_1h = get_binance_klines(symbol, '1h', limit=500)
 
